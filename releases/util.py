@@ -52,14 +52,10 @@ def parse_changelog(path, **kwargs):
         Added support for passing kwargs to `get_doctree`/`make_app`.
     """
     app, doctree = get_doctree(path, **kwargs)
-    # Have to semi-reproduce the 'find first bullet list' bit from main code,
-    # which is unfortunately side-effect-heavy (thanks to Sphinx plugin
-    # design).
-    first_list = None
-    for node in doctree[0]:
-        if isinstance(node, bullet_list):
-            first_list = node
-            break
+    first_list = next(
+        (node for node in doctree[0] if isinstance(node, bullet_list)), None
+    )
+
     # Initial parse into the structures Releases finds useful internally
     releases, manager = construct_releases(first_list.children, app)
     ret = changelog2dict(releases)
@@ -77,7 +73,7 @@ def parse_changelog(path, **kwargs):
         # unreleased_N_feature
         unreleased = manager[family].pop("unreleased_feature", None)
         if unreleased is not None:
-            ret["unreleased_{}_feature".format(family)] = unreleased
+            ret[f"unreleased_{family}_feature"] = unreleased
         # - bring over all per-line buckets from manager (flattening)
         # Here, all that's left in the per-family bucket should be lines, not
         # unreleased_*
@@ -218,7 +214,7 @@ def make_app(**kwargs):
         app.env.temp_data["docname"] = kwargs.pop("docname")
     # Allow config overrides via kwargs
     for name in kwargs:
-        config["releases_{}".format(name)] = kwargs[name]
+        config[f"releases_{name}"] = kwargs[name]
     # Stitch together as the sphinx app init() usually does w/ real conf files
     app.config._raw_config = config
     app.config.init_values()

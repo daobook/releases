@@ -29,10 +29,7 @@ class Issue(nodes.Element):
 
     @property
     def is_featurelike(self):
-        if self.type == "bug":
-            return self.major
-        else:
-            return not self.backported
+        return self.major if self.type == "bug" else not self.backported
 
     @property
     def is_buglike(self):
@@ -55,10 +52,10 @@ class Issue(nodes.Element):
         return self.get("spec", None)
 
     def __eq__(self, other):
-        for attr in self._cmp_keys:
-            if getattr(self, attr, None) != getattr(other, attr, None):
-                return False
-        return True
+        return all(
+            getattr(self, attr, None) == getattr(other, attr, None)
+            for attr in self._cmp_keys
+        )
 
     def __hash__(self):
         return reduce(xor, [hash(getattr(self, x)) for x in self._cmp_keys])
@@ -108,18 +105,11 @@ class Issue(nodes.Element):
         # Make sure truly-default spec skips 0.x if prehistory was unstable.
         stable_families = manager.stable_families
         if manager.config.releases_unstable_prehistory and stable_families:
-            specstr = ">={}".format(min(stable_families))
+            specstr = f">={min(stable_families)}"
         if self.is_featurelike:
-            # TODO: if app->config-><releases_always_forwardport_features or
-            # w/e
-            if True:
-                specstr = ">={}".format(max(manager.keys()))
-        else:
-            # Can only meaningfully limit to minor release buckets if they
-            # actually exist yet.
-            buckets = self.minor_releases(manager)
-            if buckets:
-                specstr = ">={}".format(max(buckets))
+            specstr = f">={max(manager.keys())}"
+        elif buckets := self.minor_releases(manager):
+            specstr = f">={max(buckets)}"
         return Spec(specstr) if specstr else Spec()
 
     def add_to_manager(self, manager):
@@ -176,7 +166,7 @@ class Issue(nodes.Element):
         elif self.spec:
             flag = self.spec
         if flag:
-            flag = " ({})".format(flag)
+            flag = f" ({flag})"
         return "<{issue.type} #{issue.number}{flag}>".format(
             issue=self, flag=flag
         )
@@ -199,4 +189,4 @@ class Release(nodes.Element):
         return int(self.number.split(".")[0])
 
     def __repr__(self):
-        return "<release {}>".format(self.number)
+        return f"<release {self.number}>"

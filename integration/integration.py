@@ -18,7 +18,7 @@ class integration(object):
         # Dynamic sphinx opt overrides
         if opts:
             pairs = map(lambda x: "=".join(x), (opts or {}).items())
-            flags = map(lambda x: "-D {}".format(x), pairs)
+            flags = map(lambda x: f"-D {x}", pairs)
             flagstr = " ".join(flags)
         else:
             flagstr = ""
@@ -27,15 +27,10 @@ class integration(object):
         build = os.path.join(folder, "_build")
         try:
             # Build
-            cmd = "sphinx-build {} -c {} -W {} {}".format(
-                flagstr, conf, folder, build
-            )
+            cmd = f"sphinx-build {flagstr} -c {conf} -W {folder} {build}"
             result = run(cmd, warn=warn, hide=True, in_stream=False)
             if callable(asserts):
-                if isinstance(target, string_types):
-                    targets = [target]
-                else:
-                    targets = target
+                targets = [target] if isinstance(target, string_types) else target
                 for target in targets:
                     asserts(result, build, target)
             return result
@@ -56,7 +51,7 @@ class integration(object):
         msg = "Build failed w/ stderr: {}"
         assert result.ok, msg.format(result.stderr)
         # Check for vaguely correct output
-        changelog = os.path.join(build, "{}.html".format(target))
+        changelog = os.path.join(build, f"{target}.html")
         with open(changelog) as fd:
             text = fd.read()
             assert "1.0.1" in text

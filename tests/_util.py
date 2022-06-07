@@ -25,7 +25,7 @@ def issue(type_, number, **kwargs):
     if kwargs.get("major", False):
         text += " major"
     if kwargs.get("spec", None):
-        text += " (%s)" % kwargs["spec"]
+        text += f' ({kwargs["spec"]})'
     app = kwargs.get("app", None)
     return issues_role(
         name=type_,
@@ -58,9 +58,11 @@ def entry(i):
     May give your own (non-issue/release) object to skip auto wrapping. (Useful
     since entry() is often called a few levels deep.)
     """
-    if not isinstance(i, (Issue, Release)):
-        return i
-    return list_item("", paragraph("", "", i))
+    return (
+        list_item("", paragraph("", "", i))
+        if isinstance(i, (Issue, Release))
+        else i
+    )
 
 
 def release(number, **kwargs):
@@ -68,10 +70,11 @@ def release(number, **kwargs):
     nodes = release_role(
         name=None,
         rawtext="",
-        text="%s <2013-11-20>" % number,
+        text=f"{number} <2013-11-20>",
         lineno=None,
         inliner=inliner(app=app),
     )[0]
+
     return list_item("", paragraph("", "", *nodes))
 
 
@@ -111,8 +114,11 @@ def expect_releases(entries, release_map, skip_initial=False, app=None):
         kwargs["app"] = app
     changelog = changelog2dict(releases(*entries, **kwargs))
     snapshot = dict(changelog)
-    err = "Got unexpected contents for {}: wanted {}, got {}"
-    err += "\nFull changelog: {!r}\n"
+    err = (
+        "Got unexpected contents for {}: wanted {}, got {}"
+        + "\nFull changelog: {!r}\n"
+    )
+
     for rel, issues in six.iteritems(release_map):
         found = changelog.pop(rel)
         msg = err.format(rel, issues, found, snapshot)
@@ -121,4 +127,4 @@ def expect_releases(entries, release_map, skip_initial=False, app=None):
     for key in list(changelog.keys()):
         if not changelog[key]:
             del changelog[key]
-    assert not changelog, "Found leftovers: {}".format(changelog)
+    assert not changelog, f"Found leftovers: {changelog}"
