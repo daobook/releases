@@ -45,10 +45,8 @@ def scan_for_spec(keyword):
     """
     # Both 'spec' formats are wrapped in parens, discard
     keyword = keyword.lstrip("(").rstrip(")")
-    # First, test for intermediate '1.2+' style
-    matches = release_line_re.findall(keyword)
-    if matches:
-        return Spec(">={}".format(matches[0]))
+    if matches := release_line_re.findall(keyword):
+        return Spec(f">={matches[0]}")
     # Failing that, see if Spec can make sense of it
     try:
         return Spec(keyword)
@@ -82,52 +80,43 @@ def issues_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
             # TODO: deal with % vs .format()
             ref = config.releases_issue_uri % issue_no
         elif config.releases_github_path:
-            ref = "https://github.com/{}/issues/{}".format(
-                config.releases_github_path, issue_no
-            )
+            ref = f"https://github.com/{config.releases_github_path}/issues/{issue_no}"
         # Only generate a reference/link if we were able to make a URI
         if ref:
-            identifier = nodes.reference(
-                rawtext, "#" + issue_no, refuri=ref, **options
-            )
-        # Otherwise, just make it regular text
+            identifier = nodes.reference(rawtext, f"#{issue_no}", refuri=ref, **options)
         else:
             identifier = nodes.raw(
-                rawtext=rawtext, text="#" + issue_no, format="html", **options
+                rawtext=rawtext, text=f"#{issue_no}", format="html", **options
             )
+
     else:
         identifier = None
         issue_no = None  # So it doesn't gum up dupe detection later
-    # Additional 'new-style changelog' stuff
-    if name in ISSUE_TYPES:
-        nodelist = issue_nodelist(name, identifier)
-        spec = None
-        keyword = None
+    if name not in ISSUE_TYPES:
+        return [identifier], []
+    nodelist = issue_nodelist(name, identifier)
+    spec = None
+    keyword = None
         # TODO: sanity checks re: e.g. >2 parts, >1 instance of keywords, >1
         # instance of specs, etc.
-        for part in parts:
-            maybe_spec = scan_for_spec(part)
-            if maybe_spec:
-                spec = maybe_spec
-            else:
-                if part in ("backported", "major"):
-                    keyword = part
-                else:
-                    err = "Gave unknown keyword {!r} for issue no. {}"
-                    raise ValueError(err.format(keyword, issue_no))
-        # Create temporary node w/ data & final nodes to publish
-        node = Issue(
-            number=issue_no,
-            type_=name,
-            nodelist=nodelist,
-            backported=(keyword == "backported"),
-            major=(keyword == "major"),
-            spec=spec,
-        )
-        return [node], []
-    # Return old style info for 'issue' for older changelog entries
-    else:
-        return [identifier], []
+    for part in parts:
+        if maybe_spec := scan_for_spec(part):
+            spec = maybe_spec
+        elif part in ("backported", "major"):
+            keyword = part
+        else:
+            err = "Gave unknown keyword {!r} for issue no. {}"
+            raise ValueError(err.format(keyword, issue_no))
+    # Create temporary node w/ data & final nodes to publish
+    node = Issue(
+        number=issue_no,
+        type_=name,
+        nodelist=nodelist,
+        backported=(keyword == "backported"),
+        major=(keyword == "major"),
+        spec=spec,
+    )
+    return [node], []
 
 
 def release_nodes(text, slug, date, config):
@@ -140,22 +129,15 @@ def release_nodes(text, slug, date, config):
         # TODO: % vs .format()
         uri = config.releases_release_uri % slug
     elif config.releases_github_path:
-        uri = "https://github.com/{}/tree/{}".format(
-            config.releases_github_path, slug
-        )
-    # Only construct link tag if user actually configured release URIs somehow
-    if uri:
-        link = '<a class="reference external" href="{}">{}</a>'.format(
-            uri, text
-        )
-    else:
-        link = text
-    datespan = ""
-    if date:
-        datespan = ' <span style="font-size: 75%;">{}</span>'.format(date)
-    header = '<h2 style="margin-bottom: 0.3em;">{}{}</h2>'.format(
-        link, datespan
+        uri = f"https://github.com/{config.releases_github_path}/tree/{slug}"
+    link = (
+        f'<a class="reference external" href="{uri}">{text}</a>'
+        if uri
+        else text
     )
+
+    datespan = f' <span style="font-size: 75%;">{date}</span>' if date else ""
+    header = f'<h2 style="margin-bottom: 0.3em;">{link}{datespan}</h2>'
     return nodes.section(
         "", nodes.raw(rawtext="", text=header, format="html"), ids=[text]
     )
@@ -214,13 +196,13 @@ def append_unreleased_entries(app, manager, releases):
     """
     for family, lines in six.iteritems(manager):
         for type_ in ("bugfix", "feature"):
-            bucket = "unreleased_{}".format(type_)
+            bucket = f"unreleased_{type_}"
             if bucket not in lines:  # Implies unstable prehistory + 0.x fam
                 continue
             issues = lines[bucket]
-            fam_prefix = "{}.x ".format(family) if len(manager) > 1 else ""
-            header = "Next {}{} release".format(fam_prefix, type_)
-            line = "unreleased_{}.x_{}".format(family, type_)
+            fam_prefix = f"{family}.x " if len(manager) > 1 else ""
+            header = f"Next {fam_prefix}{type_} release"
+            line = f"unreleased_{family}.x_{type_}"
             releases.append(
                 generate_unreleased_entry(header, line, issues, manager, app)
             )
@@ -251,19 +233,15 @@ def construct_entry_with_release(focus, issues, manager, log, releases, rest):
     # Do those by themselves since they override all other logic
     if explicit:
         log("Explicit issues requested: %r" % (explicit,))
-        # First scan global issue dict, dying if not found
-        missing = [i for i in explicit if i not in issues]
-        if missing:
+        if missing := [i for i in explicit if i not in issues]:
             raise ValueError(
-                "Couldn't find issue(s) #{} in the changelog!".format(
-                    ", ".join(missing)
-                )
+                f"""Couldn't find issue(s) #{", ".join(missing)} in the changelog!"""
             )
+
         # Obtain the explicitly named issues from global list
         entries = []
         for i in explicit:
-            for flattened_issue_item in itertools.chain(issues[i]):
-                entries.append(flattened_issue_item)
+            entries.extend(iter(itertools.chain(issues[i])))
         # Create release
         log("entries in this release: %r" % (entries,))
         releases.append({"obj": focus, "entries": entries})
@@ -273,103 +251,84 @@ def construct_entry_with_release(focus, issues, manager, log, releases, rest):
             if obj.type == "bug":
                 # Major bugfix: remove from unreleased_feature
                 if obj.major:
-                    log("Removing #%s from unreleased" % obj.number)
+                    log(f"Removing #{obj.number} from unreleased")
                     # TODO: consider making a LineManager method somehow
                     manager[focus.family]["unreleased_feature"].remove(obj)
-                # Regular bugfix: remove from bucket for this release's
-                # line + unreleased_bugfix
                 else:
                     if obj in manager[focus.family]["unreleased_bugfix"]:
-                        log("Removing #%s from unreleased" % obj.number)
+                        log(f"Removing #{obj.number} from unreleased")
                         manager[focus.family]["unreleased_bugfix"].remove(obj)
                     if obj in manager[focus.family][focus.minor]:
-                        log("Removing #%s from %s" % (obj.number, focus.minor))
+                        log(f"Removing #{obj.number} from {focus.minor}")
                         manager[focus.family][focus.minor].remove(obj)
-            # Regular feature/support: remove from unreleased_feature
-            # Backported feature/support: remove from bucket for this
-            # release's line (if applicable) + unreleased_feature
             else:
-                log("Removing #%s from unreleased" % obj.number)
+                log(f"Removing #{obj.number} from unreleased")
                 manager[focus.family]["unreleased_feature"].remove(obj)
                 if obj in manager[focus.family].get(focus.minor, []):
                     manager[focus.family][focus.minor].remove(obj)
 
-    # Implicit behavior otherwise
-    else:
-        # Unstable prehistory -> just dump 'unreleased' and continue
-        if manager.unstable_prehistory:
-            # TODO: need to continue making LineManager actually OO, i.e. do
-            # away with the subdicts + keys, move to sub-objects with methods
-            # answering questions like "what should I give you for a release"
-            # or whatever
-            log("in unstable prehistory, dumping 'unreleased'")
-            releases.append(
-                {
-                    "obj": focus,
-                    # NOTE: explicitly dumping 0, not focus.family, since this
-                    # might be the last pre-historical release and thus not 0.x
-                    "entries": manager[0]["unreleased"][:],
-                }
-            )
-            manager[0]["unreleased"] = []
-            # If this isn't a 0.x release, it signals end of prehistory, make a
-            # new release bucket (as is also done below in regular behavior).
-            # Also acts like a sentinel that prehistory is over.
-            if focus.family != 0:
-                manager[focus.family][focus.minor] = []
-        # Regular behavior from here
-        else:
-            # New release line/branch detected. Create it & dump unreleased
-            # features.
-            if focus.minor not in manager[focus.family]:
-                log("not seen prior, making feature release & bugfix bucket")
-                manager[focus.family][focus.minor] = []
-                # TODO: this used to explicitly say "go over everything in
-                # unreleased_feature and dump if it's feature, support or major
-                # bug". But what the hell else would BE in unreleased_feature?
-                # Why not just dump the whole thing??
-                #
-                # Dump only the items in the bucket whose family this release
-                # object belongs to, i.e. 1.5.0 should only nab the 1.0
-                # family's unreleased feature items.
-                releases.append(
-                    {
-                        "obj": focus,
-                        "entries": manager[focus.family]["unreleased_feature"][
-                            :
-                        ],
-                    }
-                )
-                manager[focus.family]["unreleased_feature"] = []
+    elif manager.unstable_prehistory:
+        # TODO: need to continue making LineManager actually OO, i.e. do
+        # away with the subdicts + keys, move to sub-objects with methods
+        # answering questions like "what should I give you for a release"
+        # or whatever
+        log("in unstable prehistory, dumping 'unreleased'")
+        releases.append(
+            {
+                "obj": focus,
+                # NOTE: explicitly dumping 0, not focus.family, since this
+                # might be the last pre-historical release and thus not 0.x
+                "entries": manager[0]["unreleased"][:],
+            }
+        )
+        manager[0]["unreleased"] = []
+        # If this isn't a 0.x release, it signals end of prehistory, make a
+        # new release bucket (as is also done below in regular behavior).
+        # Also acts like a sentinel that prehistory is over.
+        if focus.family != 0:
+            manager[focus.family][focus.minor] = []
+    elif focus.minor in manager[focus.family]:
+        log("pre-existing, making bugfix release")
+        # TODO: as in other branch, I don't get why this wasn't just
+        # dumping the whole thing - why would major bugs be in the
+        # regular bugfix buckets?
+        entries = manager[focus.family][focus.minor][:]
+        releases.append({"obj": focus, "entries": entries})
+        manager[focus.family][focus.minor] = []
+        # Clean out the items we just released from
+        # 'unreleased_bugfix'.  (Can't nuke it because there might
+        # be some unreleased bugs for other release lines.)
+        for x in entries:
+            if x in manager[focus.family]["unreleased_bugfix"]:
+                manager[focus.family]["unreleased_bugfix"].remove(x)
 
-            # Existing line -> empty out its bucket into new release.
-            # Skip 'major' bugs as those "belong" to the next release (and will
-            # also be in 'unreleased_feature' - so safe to nuke the entire
-            # line)
-            else:
-                log("pre-existing, making bugfix release")
-                # TODO: as in other branch, I don't get why this wasn't just
-                # dumping the whole thing - why would major bugs be in the
-                # regular bugfix buckets?
-                entries = manager[focus.family][focus.minor][:]
-                releases.append({"obj": focus, "entries": entries})
-                manager[focus.family][focus.minor] = []
-                # Clean out the items we just released from
-                # 'unreleased_bugfix'.  (Can't nuke it because there might
-                # be some unreleased bugs for other release lines.)
-                for x in entries:
-                    if x in manager[focus.family]["unreleased_bugfix"]:
-                        manager[focus.family]["unreleased_bugfix"].remove(x)
+    else:
+        log("not seen prior, making feature release & bugfix bucket")
+        manager[focus.family][focus.minor] = []
+        # TODO: this used to explicitly say "go over everything in
+        # unreleased_feature and dump if it's feature, support or major
+        # bug". But what the hell else would BE in unreleased_feature?
+        # Why not just dump the whole thing??
+        #
+        # Dump only the items in the bucket whose family this release
+        # object belongs to, i.e. 1.5.0 should only nab the 1.0
+        # family's unreleased feature items.
+        releases.append(
+            {
+                "obj": focus,
+                "entries": manager[focus.family]["unreleased_feature"][
+                    :
+                ],
+            }
+        )
+        manager[focus.family]["unreleased_feature"] = []
 
 
 def construct_entry_without_release(focus, issues, manager, log, rest):
     # Handle rare-but-valid non-issue-attached line items, which are
     # always bugs. (They are their own description.)
     if not isinstance(focus, Issue):
-        # First, sanity check for potential mistakes resulting in an issue node
-        # being buried within something else.
-        buried = focus.traverse(Issue)
-        if buried:
+        if buried := focus.traverse(Issue):
             msg = """
 Found issue node ({!r}) buried inside another node:
 
@@ -421,7 +380,7 @@ def handle_upcoming_major_release(entries, manager):
         return
     # Iterate through entries til we find the next Release or set of Releases
     next_releases = []
-    for index, obj in enumerate(entries):
+    for obj in entries:
         if isinstance(obj, Release):
             next_releases.append(obj)
         # Non-empty next_releases + encountered a non-release = done w/ release
@@ -638,9 +597,7 @@ def setup(app):
         # TODO: flip this to True by default in our 3.0 release
         ("unstable_prehistory", False),
     ):
-        app.add_config_value(
-            name="releases_{}".format(key), default=default, rebuild="html"
-        )
+        app.add_config_value(name=f"releases_{key}", default=default, rebuild="html")
     if isinstance(app.config.releases_document_name, six.string_types):
         app.config.releases_document_name = [app.config.releases_document_name]
 

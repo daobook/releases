@@ -5,7 +5,6 @@ import sys
 import sphinx_rtd_theme
 
 
-extensions = []
 templates_path = ["_templates"]
 source_suffix = ".rst"
 master_doc = "index"
@@ -23,6 +22,5 @@ exclude_patterns = ["_build"]
 html_theme = "sphinx_rtd_theme"
 html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 
-# Dogfood
-extensions.append("releases")
+extensions = ["releases"]
 releases_github_path = "bitprophet/releases"
